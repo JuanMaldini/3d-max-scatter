@@ -52,22 +52,4 @@ global MaxScatter
     )
     else
         format "[MaxScatter] load finished with % problem(s)\n" failed
-
-    -- main menu entry (idempotent): MaxScatter > Create MaxScatter
-    try
-    (
-        if (menuMan.findMenu "MaxScatter") == undefined do
-        (
-            local m = menuMan.createMenu "MaxScatter"
-            local ai = menuMan.createActionItem "MaxScatter_Create" "MaxScatter"
-            if ai != undefined do
-            (
-                m.addItem ai -1
-                local smi = menuMan.createSubMenuItem "MaxScatter" m
-                (menuMan.getMainMenuBar()).addItem smi -1
-                menuMan.updateMenuBar()
-            )
-        )
-    )
-    catch ( format "[MaxScatter] menu install skipped: %\n" (getCurrentException()) )
 )
