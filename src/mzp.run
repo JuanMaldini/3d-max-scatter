@@ -1,0 +1,7 @@
+name "MaxScatter"
+description "Open source scatter tool for 3ds Max"
+version 1
+treecopy "MaxScatter" to "$userscripts\MaxScatter"
+copy "MaxScatter.mcr" to "$usermacros\MaxScatter.mcr"
+run "install.ms"
+clear temp on close

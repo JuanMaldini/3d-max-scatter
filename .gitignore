@@ -1,0 +1,26 @@
+# Documentación de trabajo / planificación (local, no se commitea)
+docs/
+
+# Assets no usados por el proyecto
+app.png
+icon.ico
+
+# Artefactos de build
+dist/
+build/tmp/
+*.mzp
+
+# 3ds Max
+*.bak
+*.hold
+autoback/
+*.mse
+*.dlx
+maxscript.log
+
+# Windows / editores
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*~
