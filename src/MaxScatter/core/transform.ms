@@ -28,7 +28,7 @@ struct MaxScatter_Transform
 (
     fn rnd lo hi = ( if lo == hi then lo else random lo hi ),
 
-    fn placement pos nrm pp tangent:undefined alignPath:false =
+    fn placement pos nrm pp tangent:undefined alignPath:false scaleMul:1.0 rollDeg:0.0 =
     (
         local up, xa, ya
         if alignPath and tangent != undefined then
@@ -39,6 +39,13 @@ struct MaxScatter_Transform
             if (length t2) < 1e-4 then t2 = [1,0,0]
             xa = normalize t2
             ya = normalize (cross up xa)
+            -- roll/bank spins the frame around the path axis
+            if rollDeg != 0.0 do
+            (
+                local rm = rotate (matrix3 1) (angleaxis rollDeg xa)
+                ya = normalize (ya * rm)
+                up = normalize (up * rm)
+            )
         )
         else
         (
@@ -65,6 +72,9 @@ struct MaxScatter_Transform
             sv = [s, s, s]
         )
         else sv = [this.rnd pp.sxMin pp.sxMax, this.rnd pp.syMin pp.syMax, this.rnd pp.szMin pp.szMax]
+
+        -- path ramps and mask falloff arrive pre-multiplied as one factor
+        if scaleMul != 1.0 do sv *= scaleMul
 
         m = (scaleMatrix sv) * rot * m
 

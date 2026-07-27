@@ -28,6 +28,16 @@ struct MaxScatterNS
     pendingRegen = #(),    -- plugin instances queued by the regen debounce
     pendingCleanup = #(),  -- item containers whose scatter object was deleted
 
+    layerName = "MaxScatter",
+
+    /* Scene layer every MaxScatter node lives on; created on demand. */
+    fn ensureLayer =
+    (
+        local lay = LayerManager.getLayerFromName this.layerName
+        if lay == undefined do lay = LayerManager.newLayerFromName this.layerName
+        lay
+    ),
+
     logPath = (getDir #temp) + "\\MaxScatter.log",
     devLog  = false,   -- dev only: dev_reload.ms turns it on; releases ship with it off
 

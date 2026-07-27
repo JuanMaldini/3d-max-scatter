@@ -64,20 +64,23 @@ struct MaxScatter_EmitNodes
     ),
 
     /* One unit: plain instance for single meshes, subtree clone otherwise. */
-    fn makeUnit src holder =
+    fn makeUnit src holder lay: =
     (
-        local root
+        local root, made
         if src.children.count == 0 and not (isGroupHead src) then
         (
             root = instance src
+            made = #(root)
         )
         else
         (
             local nn
             maxOps.cloneNodes (this.subtree src) cloneType:#instance newNodes:&nn
             root = nn[1]
+            made = nn
         )
         root.parent = holder
+        if lay != undefined do for n in made do lay.addNode n
         setUserProp root "msK" (src.inode.handle as string)
         root
     ),
@@ -89,6 +92,7 @@ struct MaxScatter_EmitNodes
         local out = #()
         if sources.count > 0 and isValidNode holder do
         (
+            local lay = try (MaxScatter.ensureLayer()) catch undefined
             local keys = for s in sources collect (s.inode.handle as string)
 
             -- bucket existing unit roots by their source key for reuse
@@ -111,7 +115,7 @@ struct MaxScatter_EmitNodes
                 local idx = placements[i][2]
                 local n
                 if btop[idx] > 0 then ( n = buckets[idx][btop[idx]]; btop[idx] -= 1 )
-                else n = this.makeUnit sources[idx] holder
+                else n = this.makeUnit sources[idx] holder lay:lay
                 n.transform = placements[i][1]
                 this.applyDisplay n mode
                 out[i] = n

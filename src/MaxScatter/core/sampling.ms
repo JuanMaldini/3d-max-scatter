@@ -8,6 +8,25 @@
 
 global MaxScatter
 
+/*  Sweep-style options for scattering along a path. Defaults reproduce the
+    plain random-by-length behaviour, so an untouched scatter is unaffected.  */
+struct MaxScatter_PathOpts
+(
+    even       = false,   -- space by distance instead of by count
+    spacing    = 100.0,   -- world units between items when even
+    trimS      = 0.0,     -- usable run, 0..1 of the curve length
+    trimE      = 1.0,
+    offX       = 0.0,     -- constant lateral offset from the axis
+    offZ       = 0.0,     -- constant vertical offset
+    stagger    = false,   -- alternate sides, like fence posts
+    stagDist   = 0.0,
+    roll       = 0.0,     -- fixed spin around the path axis, degrees
+    bank       = 0.0,     -- 0..1, lean into the curve
+    scaleStart = 1.0,     -- scale ramp from the start to the end of the run
+    scaleEnd   = 1.0,
+    scaleLat   = 0.0      -- 0..1, shrink with distance from the axis
+)
+
 struct MaxScatter_Sampling
 (
     /* Total world-space surface area of a node, used to turn density into a count. */
@@ -130,54 +149,104 @@ struct MaxScatter_Sampling
         #(items, temps, total)
     ),
 
-    fn splineLengthMany shapes =
+    fn splineLengthMany shapes trimS:0.0 trimE:1.0 =
     (
         local si = this.splineItems shapes
         if si[2].count > 0 do delete si[2]
-        si[3]
+        si[3] * (amax 0.0 (trimE - trimS))
     ),
 
-    /*  Random-by-length sampling along spline paths. Tuples get a 4th element:
-        the path tangent. Normal is world up; spread is a lateral jitter
-        perpendicular to the path.  */
-    fn sampleSplines shapes count spread =
+    /*  Sampling along spline paths, Sweep-style. Tuple layout:
+            #(pos, normal, uv, tangent, scaleMul, rollDeg)
+        Normal is world up (the placement frame comes from the tangent);
+        scaleMul and rollDeg carry the per-item results of the path options
+        so the transform module stays free of path knowledge.
+
+        opt is a MaxScatter_PathOpts; count is ignored when opt.even is on,
+        because spacing then decides how many fit.  */
+    fn sampleSplines shapes count spread opt:undefined =
     (
+        if opt == undefined do opt = MaxScatter_PathOpts()
         local out = #()
+        local tS = amax 0.0 (amin 1.0 opt.trimS)
+        local tE = amax 0.0 (amin 1.0 opt.trimE)
+        if tE < tS do ( local sw = tS; tS = tE; tE = sw )
+        local frac = tE - tS
+
         local si = this.splineItems shapes
         local items = si[1], temps = si[2], total = si[3]
-        if items.count > 0 and total > 0.0 and count > 0 do
+        if items.count > 0 and total > 0.0 and frac > 0.0 and (count > 0 or opt.even) do
         (
-            -- allocate per spline by length, remainder round-robin
+            -- how many go on each spline: by spacing, or split by length
             local alloc = #()
             alloc.count = items.count
-            local used = 0
-            for i = 1 to items.count do
+            if opt.even then
             (
-                alloc[i] = ((count * items[i][3] / total) as integer)
-                used += alloc[i]
+                local sp = amax 1e-4 opt.spacing
+                for i = 1 to items.count do
+                    alloc[i] = amax 1 (((items[i][3] * frac) / sp) as integer)
             )
-            local i = 1
-            while used < count do
+            else
             (
-                alloc[i] += 1; used += 1
-                i = if i == items.count then 1 else i + 1
+                local used = 0
+                for i = 1 to items.count do
+                (
+                    alloc[i] = ((count * items[i][3] / total) as integer)
+                    used += alloc[i]
+                )
+                local i = 1
+                while used < count do
+                (
+                    alloc[i] += 1; used += 1
+                    i = if i == items.count then 1 else i + 1
+                )
             )
+
+            -- widest lateral reach, so the lateral scale falloff has a scale
+            local maxLat = (abs opt.offX) + (abs spread) + (if opt.stagger then (abs opt.stagDist) else 0.0)
 
             for j = 1 to items.count do
             (
                 local sh = items[j][1], sp = items[j][2]
-                for k = 1 to alloc[j] do
+                local cnt = alloc[j]
+                for k = 1 to cnt do
                 (
-                    local prm = lengthToPathParam sh sp (random 0.0 1.0)
+                    -- fraction along the trimmed run: evenly spaced or random
+                    local f = if opt.even then
+                            (tS + frac * ((k - 0.5) / (cnt as float)))
+                        else (random tS tE)
+
+                    local prm = lengthToPathParam sh sp f
                     local pos = pathInterp sh sp prm
                     local tang = normalize (pathTangent sh sp prm)
-                    if spread != 0.0 do
+
+                    local perp = cross tang [0,0,1]
+                    if (length perp) < 1e-4 then perp = [1,0,0] else perp = normalize perp
+
+                    -- lateral: fixed offset + alternating side + random spread
+                    local lat = opt.offX
+                    if opt.stagger do lat += (if (mod k 2) == 1 then opt.stagDist else -opt.stagDist)
+                    if spread != 0.0 do lat += (random (-spread) spread)
+                    if lat != 0.0 do pos += perp * lat
+                    if opt.offZ != 0.0 do pos.z += opt.offZ
+
+                    -- scale: lerp along the run, then shrink with lateral distance
+                    local u = if frac > 0.0 then ((f - tS) / frac) else 0.0
+                    local sc = opt.scaleStart + (opt.scaleEnd - opt.scaleStart) * u
+                    if opt.scaleLat > 0.0 and maxLat > 1e-6 do
+                        sc *= 1.0 - opt.scaleLat * (amin 1.0 ((abs lat) / maxLat))
+                    if sc < 1e-4 do sc = 1e-4
+
+                    -- bank into the turn: signed change of tangent around world Z
+                    local roll = opt.roll
+                    if opt.bank != 0.0 do
                     (
-                        local perp = cross tang [0,0,1]
-                        if (length perp) < 1e-4 then perp = [1,0,0] else perp = normalize perp
-                        pos += perp * (random (-spread) spread)
+                        local f2 = amin 1.0 (f + 0.01)
+                        local t2 = normalize (pathTangent sh sp (lengthToPathParam sh sp f2))
+                        roll += -((cross tang t2).z) * 90.0 * opt.bank
                     )
-                    append out #(pos, [0,0,1], undefined, tang)
+
+                    append out #(pos, [0,0,1], undefined, tang, sc, roll)
                 )
             )
         )

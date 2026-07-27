@@ -27,7 +27,13 @@
     if doesFileExist initPath then
     (
         fileIn initPath
-        format "[MaxScatter] installed. Create panel > Helpers > MaxScatter, or add the toolbar button (category MaxScatter).\n"
+        local ver = try ( MaxScatter.version ) catch ( "?" )
+        format "[MaxScatter] v% installed. Create panel > Helpers > MaxScatter, or add the toolbar button (category MaxScatter).\n" ver
+        messageBox ("MaxScatter v" + ver + " installed / updated.\n\nCreate panel > Helpers > MaxScatter\nToolbar button: category \"MaxScatter\"") title:"MaxScatter"
     )
-    else format "[MaxScatter] install problem: % not found\n" initPath
+    else
+    (
+        format "[MaxScatter] install problem: % not found\n" initPath
+        messageBox ("MaxScatter install FAILED:\n" + initPath + " not found.\nCheck the MAXScript Listener.") title:"MaxScatter"
+    )
 )
