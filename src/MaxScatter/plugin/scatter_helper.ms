@@ -17,6 +17,7 @@ global MaxScatter
 global MaxScatterObj_regen
 global MaxScatter_rtRestyle
 global MaxScatter_camWatch
+global MaxScatter_queueCleanup
 global MaxScatter_filterGeo
 global MaxScatter_filterSrc
 global MaxScatter_filterShape
@@ -43,6 +44,10 @@ plugin helper MaxScatterObj
         pathSplines type:#nodeTab   tabSizeVariable:true subAnim:true
         inclSplines type:#nodeTab   tabSizeVariable:true subAnim:true
         exclSplines type:#nodeTab   tabSizeVariable:true subAnim:true
+
+        /*  Hidden container the instances parent to, so the helper icon moves
+            freely without dragging (or recomputing) thousands of children.  */
+        itemHolder  type:#node
     )
 
     parameters pbDist rollout:rolDist
@@ -123,10 +128,7 @@ plugin helper MaxScatterObj
 
         on emitMode set v do if not loading do MaxScatterObj_regen this
         on dispMode set v do if not loading do
-        (
-            local deps = refs.dependentNodes this
-            if deps.count > 0 do MaxScatter.emitNodes.restyle deps[1] v
-        )
+            MaxScatter.emitNodes.restyle itemHolder v
         on prxMode  set v do if not loading and emitMode == 2 do MaxScatter_rtRestyle this
         on dispPct  set v do if not loading and emitMode == 2 do MaxScatter_rtRestyle this
         on pcPoints set v do if not loading and emitMode == 2 do MaxScatter_rtRestyle this
@@ -529,10 +531,9 @@ plugin helper MaxScatterObj
         on ddlPrx  selected i do ( prxMode = i; syncDisp() )
         on btnBake pressed do
         (
-            local deps = refs.dependentNodes this
-            if deps.count > 0 and isValidNode deps[1] do
+            if isValidNode itemHolder do
             (
-                local kids = for c in deps[1].children collect c
+                local kids = for c in itemHolder.children collect c
                 for c in kids do c.parent = undefined
                 if kids.count > 0 do select kids
             )
@@ -565,6 +566,9 @@ plugin helper MaxScatterObj
         plugin's own creation context yields an empty snapshot. The pipeline
         builds it on the first regen instead.  */
     on attachedToNode n do if not loading do n.wirecolor = white
+
+    /*  Container cleanup on delete lives in pipeline.ms (#nodePreDelete):
+        the plugin's own `on deleted` fires after the paramblock detaches.  */
 
     tool create
     (

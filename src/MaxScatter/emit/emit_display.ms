@@ -148,8 +148,9 @@ struct MaxScatter_EmitDisplay
 
     /*  The proxy mesh. prxMode: 1 Box, 2 Cone, 3 Point cloud (pcPoints per
         item, like Corona's previz density). pct thins the DISPLAY only; the
-        render always materialises the full list.  */
-    fn buildMesh srcs places prxMode pct pcPoints =
+        render always materialises the full list. ownerInv converts world
+        placements into the helper's local space, so the icon stays movable.  */
+    fn buildMesh srcs places prxMode pct pcPoints ownerInv:(matrix3 1) =
     (
         local bbs = for s in srcs collect (MaxScatter.emitNodes.unitLocalBBox s)
         local pcl = if prxMode == 3 then
@@ -161,7 +162,7 @@ struct MaxScatter_EmitDisplay
         while i <= places.count do
         (
             local k = i as integer
-            local m  = places[k][1]
+            local m  = places[k][1] * ownerInv   -- world -> helper local
             local si = places[k][2]
             local a = bbs[si][1], b = bbs[si][2]
 
@@ -223,7 +224,12 @@ struct MaxScatter_EmitDisplay
             (
                 local owner = maxOps.getNodeByHandle e[1]
                 if isValidNode owner and e[3] != undefined do
-                    e[5] = MaxScatter.emitNodes.emit e[2] e[3] owner mode:1
+                (
+                    -- parent to the hidden container, not the icon
+                    local h = try (owner.baseObject.itemHolder) catch undefined
+                    if not (isValidNode h) do h = owner
+                    e[5] = MaxScatter.emitNodes.emit e[2] e[3] h mode:1
+                )
             )
         ok
     ),

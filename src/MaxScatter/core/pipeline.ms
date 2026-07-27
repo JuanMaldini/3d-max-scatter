@@ -11,12 +11,17 @@
 */
 
 global MaxScatter
+global MaxScatterObj      -- the plugin class: declared so when-blocks compile
+                          -- at cold start, before plugin/scatter_helper.ms loads
 global MaxScatterObj_regen
 global MaxScatter_rtRestyle
 global MaxScatter_camWatch
+global MaxScatter_selfWatch
+global MaxScatter_queueCleanup
 global MaxScatter_rtPre
 global MaxScatter_rtPost
 global MaxScatter_postOpen
+global MaxScatter_preDel
 
 struct MaxScatter_Pipeline
 (
@@ -47,6 +52,21 @@ struct MaxScatter_Pipeline
         (pp.zoMin as string) + "," + (pp.zoMax as string)
     ),
 
+    /*  The hidden container the instances live under -- NOT the helper node,
+        so the icon moves freely without dragging the whole scatter.  */
+    fn ensureHolder p owner =
+    (
+        local h = p.itemHolder
+        if not (isValidNode h) do
+        (
+            h = Point name:(uniqueName (owner.name + "_items")) size:1 cross:false box:false
+            h.transform = matrix3 1
+            h.isHidden = true
+            p.itemHolder = h
+        )
+        h
+    ),
+
     /* p is the plugin instance. Returns the number of items placed. */
     fn regen p =
     (
@@ -73,10 +93,12 @@ struct MaxScatter_Pipeline
 
                 undo "MaxScatter" on
                 (
+                    local holder = this.ensureHolder p owner
+
                     if srcs.count == 0 or (not onSpline and surfs.count == 0) \
                         or (onSpline and paths.count == 0) then
                     (
-                        MaxScatter.emitNodes.clear owner
+                        MaxScatter.emitNodes.clear holder
                         MaxScatter.emitDisplay.dropEntry owner.inode.handle
                     )
                     else
@@ -188,11 +210,12 @@ struct MaxScatter_Pipeline
 
                         if p.emitMode == 2 then
                         (
-                            -- emitter B: proxy mesh in viewport, real nodes only at render
-                            MaxScatter.emitNodes.clear owner
-                            MaxScatter.emitDisplay.buildGizmo()
+                            -- emitter B: proxy mesh in viewport, real nodes only at
+                            -- render. Mesh is helper-LOCAL so the icon can be moved;
+                            -- the self-watcher rebuilds it after a move.
+                            MaxScatter.emitNodes.clear holder
                             local msh = MaxScatter.emitDisplay.buildMesh srcs places \
-                                p.prxMode p.dispPct p.pcPoints
+                                p.prxMode p.dispPct p.pcPoints ownerInv:(inverse owner.transform)
                             MaxScatter.emitDisplay.setEntry owner.inode.handle srcs places msh
                             p.rtTick += 1   -- pb change -> display invalidate
                             made = places.count
@@ -200,7 +223,7 @@ struct MaxScatter_Pipeline
                         else
                         (
                             MaxScatter.emitDisplay.dropEntry owner.inode.handle
-                            made = (MaxScatter.emitNodes.emit srcs places owner mode:p.dispMode).count
+                            made = (MaxScatter.emitNodes.emit srcs places holder mode:p.dispMode).count
                         )
                     )
                 )
@@ -217,12 +240,70 @@ struct MaxScatter_Pipeline
 
 MaxScatter.pipeline = MaxScatter_Pipeline()
 
-/* Thin, stable entry point the plugin calls. */
+/*  Regen debounce -- the anti-freeze.
+
+    Param set handlers and the camera watcher fire on EVERY tick of a spinner
+    drag or camera move; regenerating each tick freezes Max. Handlers queue
+    the instance here instead, and a 150 ms UI timer collapses the burst into
+    ONE regen after the last tick. Synchronous paths (render callbacks, file
+    open) call MaxScatter.pipeline.regen directly.
+*/
+global MaxScatter_regenTimer
+global MaxScatter_regenTick
+
+fn MaxScatter_regenTick s e =
+(
+    MaxScatter_regenTimer.stop()
+    local lst = MaxScatter.pendingRegen
+    MaxScatter.pendingRegen = #()
+    for p in lst do try (MaxScatter.pipeline.regen p) catch()
+
+    -- deferred cleanup: nodes cannot be deleted from inside `on deleted`
+    local cl = MaxScatter.pendingCleanup
+    MaxScatter.pendingCleanup = #()
+    for h in cl where isValidNode h do try
+    (
+        MaxScatter.emitNodes.clear h
+        delete h
+    )
+    catch()
+    -- drop proxy caches whose scatter no longer exists
+    local ent = MaxScatter.emitDisplay.entries
+    for i = ent.count to 1 by -1 do
+        if not (isValidNode (maxOps.getNodeByHandle ent[i][1])) do deleteItem ent i
+
+    try (MaxScatter_selfWatch()) catch()   -- keep icon watchers in sync
+    ok
+)
+
+/* Called by the plugin's `on deleted`; the timer does the actual deleting. */
+fn MaxScatter_queueCleanup h =
+(
+    if MaxScatter != undefined do
+    (
+        append MaxScatter.pendingCleanup h
+        MaxScatter_regenTimer.stop()
+        MaxScatter_regenTimer.start()
+    )
+    ok
+)
+
+if MaxScatter_regenTimer != undefined do
+    try ( MaxScatter_regenTimer.stop(); dotNet.removeAllEventHandlers MaxScatter_regenTimer ) catch()
+MaxScatter_regenTimer = dotNetObject "System.Windows.Forms.Timer"
+MaxScatter_regenTimer.interval = 150
+dotNet.addEventHandler MaxScatter_regenTimer "Tick" MaxScatter_regenTick
+
+/* Thin, stable entry point the plugin calls: queue + (re)start the timer. */
 fn MaxScatterObj_regen p =
 (
-    if MaxScatter != undefined and MaxScatter.pipeline != undefined then
-        MaxScatter.pipeline.regen p
-    else 0
+    if MaxScatter != undefined and MaxScatter.pipeline != undefined do
+    (
+        appendIfUnique MaxScatter.pendingRegen p
+        MaxScatter_regenTimer.stop()
+        MaxScatter_regenTimer.start()
+    )
+    0
 )
 
 /*  Proxy display style changed (mode / % / point density): rebuild the mesh
@@ -239,7 +320,8 @@ fn MaxScatter_rtRestyle p =
             if i > 0 then
             (
                 local e = MaxScatter.emitDisplay.entries[i]
-                e[4] = MaxScatter.emitDisplay.buildMesh e[2] e[3] p.prxMode p.dispPct p.pcPoints
+                e[4] = MaxScatter.emitDisplay.buildMesh e[2] e[3] p.prxMode p.dispPct p.pcPoints \
+                    ownerInv:(inverse deps[1].transform)
                 p.rtTick += 1
             )
             else MaxScatterObj_regen p   -- no cache yet (fresh session)
@@ -266,6 +348,22 @@ fn MaxScatter_camWatch =
     ok
 )
 
+/*  Proxy scatters draw in helper-local space: when the ICON itself moves,
+    rebuild the cached display mesh (debounced through the regen queue).  */
+fn MaxScatter_selfWatch =
+(
+    deleteAllChangeHandlers id:#MaxScatterSelfW
+    if (classOf MaxScatterObj) != undefined do
+        for pb in (getClassInstances MaxScatterObj) where pb.emitMode == 2 do
+        (
+            local deps = refs.dependentNodes pb
+            if deps.count > 0 and isValidNode deps[1] do
+                when transform deps[1] changes id:#MaxScatterSelfW n do
+                    MaxScatterObj_regen n.baseObject
+        )
+    ok
+)
+
 fn MaxScatter_rtPre  = ( try (MaxScatter.emitDisplay.renderStart()) catch (MaxScatter.logErr "rtPre"  (getCurrentException())) )
 fn MaxScatter_rtPost = ( try (MaxScatter.emitDisplay.renderEnd())   catch (MaxScatter.logErr "rtPost" (getCurrentException())) )
 
@@ -278,11 +376,31 @@ fn MaxScatter_postOpen =
             for pb in (getClassInstances MaxScatterObj) where pb.emitMode == 2 do
                 MaxScatterObj_regen pb
         MaxScatter_camWatch()
+        MaxScatter_selfWatch()
     )
     catch ( MaxScatter.logErr "postOpen" (getCurrentException()) )
 )
 
+/*  Deleting a scatter must take its hidden container along. The plugin's own
+    `on deleted` fires too late (paramblock already detached), so this hooks
+    the pre-delete notification instead and defers the actual delete to the
+    debounce timer.  */
+fn MaxScatter_preDel =
+(
+    try
+    (
+        local n = callbacks.notificationParam()
+        if (classOf MaxScatterObj) != undefined and (classOf n.baseObject) == MaxScatterObj do
+        (
+            local h = n.baseObject.itemHolder
+            if isValidNode h do MaxScatter_queueCleanup h
+        )
+    )
+    catch()
+)
+
 callbacks.removeScripts id:#MaxScatterRT
-callbacks.addScript #preRender    "MaxScatter_rtPre()"   id:#MaxScatterRT
-callbacks.addScript #postRender   "MaxScatter_rtPost()"  id:#MaxScatterRT
-callbacks.addScript #filePostOpen "MaxScatter_postOpen()" id:#MaxScatterRT
+callbacks.addScript #preRender     "MaxScatter_rtPre()"   id:#MaxScatterRT
+callbacks.addScript #postRender    "MaxScatter_rtPost()"  id:#MaxScatterRT
+callbacks.addScript #filePostOpen  "MaxScatter_postOpen()" id:#MaxScatterRT
+callbacks.addScript #nodePreDelete "MaxScatter_preDel()"  id:#MaxScatterRT

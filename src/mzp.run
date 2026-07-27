@@ -3,5 +3,9 @@ description "Open source scatter tool for 3ds Max"
 version 1
 treecopy "MaxScatter" to "$userscripts\MaxScatter"
 copy "MaxScatter.mcr" to "$usermacros\MaxScatter.mcr"
+copy "MaxScatter_16.png" to "$usericons\MaxScatter_16.png"
+copy "MaxScatter_24.png" to "$usericons\MaxScatter_24.png"
+copy "MaxScatter_36.png" to "$usericons\MaxScatter_36.png"
+copy "MaxScatter_48.png" to "$usericons\MaxScatter_48.png"
 run "install.ms"
 clear temp on close

@@ -45,6 +45,13 @@ versioning follows [SemVer](https://semver.org/).
   regenerations (spinner drags move nodes instead of rebuilding).
 - Modularised: all regen logic lives in `core/pipeline.ms` (hot-reloadable);
   the plugin file is a thin shell of paramblocks + rollouts.
+- **Regen debounce**: param handlers and the camera watcher queue into a
+  150 ms UI timer that collapses bursts into one regeneration — dragging a
+  spinner or navigating a camera viewport no longer freezes Max (a 20-tick
+  camera drag went from ~2.6 s of blocking regens to 5 ms of queueing).
+- `build.bat` (repo root) packages `dist/MaxScatter-v<version>.mzp` via
+  `build/build_mzp.ps1`; version read from `core/ns.ms`. The .mzp installs by
+  viewport drag & drop, writes the startup stub and loads without restart.
 - Dev logging to `(getDir #temp)\MaxScatter.log`, enabled only in dev sessions.
 - `build/dev_link.ps1` junction installer (+ startup stub so saved scenes load
   the plugin class) and `build/dev_reload.ms` hot reload.
@@ -68,5 +75,9 @@ versioning follows [SemVer](https://semver.org/).
 - Creating helper scene nodes from inside a scripted plugin's own creation
   context (`on attachedToNode`) can yield empty snapshots — build shared
   meshes from the pipeline instead.
+- `when` handler bodies cannot capture outer locals: a name that only becomes
+  a global later in the load order (the plugin class) must be pre-declared
+  `global`, or the cold-start compile fails with "No outer local variable
+  references permitted here".
 
 [Unreleased]: https://github.com/JuanMaldini/3d-max-scatter/commits/main

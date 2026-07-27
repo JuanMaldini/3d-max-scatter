@@ -28,6 +28,7 @@ Copy-Item (Join-Path $src "MaxScatter")            (Join-Path $stage "MaxScatter
 Copy-Item (Join-Path $src "macro\MaxScatter.mcr")  $stage
 Copy-Item (Join-Path $src "mzp.run")               $stage
 Copy-Item (Join-Path $src "install.ms")            $stage
+Copy-Item (Join-Path $src "icons\MaxScatter_*.png") $stage
 
 $zip = Join-Path $repo "build\tmp\MaxScatter.zip"
 $mzp = Join-Path $dist "MaxScatter-v$ver.mzp"

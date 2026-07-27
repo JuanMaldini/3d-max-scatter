@@ -51,6 +51,12 @@ New-Item -ItemType Directory -Force -Path (Split-Path $macroDst) | Out-Null
 Copy-Item $macroSrc $macroDst -Force
 "macro:    $macroDst"
 
+# toolbar icons
+$iconsDir = Join-Path $enu "usericons"
+New-Item -ItemType Directory -Force -Path $iconsDir | Out-Null
+Copy-Item (Join-Path (Split-Path $PSScriptRoot -Parent) "src\icons\MaxScatter_*.png") $iconsDir -Force
+"icons:    $iconsDir\MaxScatter_*.png"
+
 # Scripted plugin classes must exist BEFORE a saved scene that uses them is
 # opened, or its objects load as Missing Plugin -- hence a startup stub.
 New-Item -ItemType Directory -Force -Path (Split-Path $startupDst) | Out-Null

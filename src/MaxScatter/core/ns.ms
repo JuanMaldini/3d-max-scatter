@@ -25,6 +25,8 @@ struct MaxScatterNS
     pipeline    = undefined,
     theme       = undefined,
     state       = undefined,
+    pendingRegen = #(),    -- plugin instances queued by the regen debounce
+    pendingCleanup = #(),  -- item containers whose scatter object was deleted
 
     logPath = (getDir #temp) + "\\MaxScatter.log",
     devLog  = false,   -- dev only: dev_reload.ms turns it on; releases ship with it off
