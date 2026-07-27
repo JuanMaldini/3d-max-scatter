@@ -120,7 +120,7 @@ reference silently binds to a file-local `undefined`.
 - [x] **0.1-g** — spline-as-path distribution, auto re-cull on camera move
 - [x] **0.2** — proxy emitter: Box / Cone / Point cloud previews with
       Display %, materialised at render time; world gizmo
-- [ ] **0.1-e** — presets, `.mzp` packaging
+- [x] **0.1-e** — `.mzp` packaging (`build.bat` → `dist/`, drag & drop install)
 - [ ] **1.0** — collision avoidance, export, docs, CI
 
 ## License

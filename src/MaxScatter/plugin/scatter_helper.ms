@@ -124,6 +124,7 @@ plugin helper MaxScatterObj
         prxMode  type:#integer default:1     -- proxy: 1 box, 2 cone, 3 point cloud
         dispPct  type:#integer default:100 ui:spnPct
         pcPoints type:#integer default:20  ui:spnPts
+        iconSize type:#worldUnits default:100.0 ui:spnIcon
         rtTick   type:#integer default:0 animatable:false invisibleInTV:true
 
         on emitMode set v do if not loading do MaxScatterObj_regen this
@@ -137,37 +138,42 @@ plugin helper MaxScatterObj
     rollout rolSrc "Sources"
     (
         listbox    lbS     "" items:#() height:5
-        pickbutton pbAddS  "+ Add"  width:66 across:2 filter:MaxScatter_filterSrc \
-            tooltip:"Pick an object, group or hierarchy to scatter"
+        button     btnAddS "+ Add"  width:66 across:2 \
+            tooltip:"Click objects, groups or hierarchies to add; right-click to finish"
         button     btnDelS "Remove" width:66
         spinner    spnProb "Prob " type:#float range:[0, 1, 1] scale:0.01 fieldwidth:50 \
             tooltip:"Chance 0-1 that this item appears at each scattered point. Probabilities summing under 1 leave the rest empty."
 
         label      lbl2 "Surfaces" align:#left offset:[0,8]
         listbox    lbT     "" items:#() height:4
-        pickbutton pbAddT  "+ Add"  width:66 across:2 filter:MaxScatter_filterGeo
+        button     btnAddT "+ Add"  width:66 across:2 \
+            tooltip:"Click meshes to add; right-click to finish"
         button     btnDelT "Remove" width:66
 
         label      lbl5 "Spline paths" align:#left offset:[0,8]
         listbox    lbP     "" items:#() height:3
-        pickbutton pbAddP  "+ Add"  width:66 across:2 filter:MaxScatter_filterShape \
-            tooltip:"Open or closed splines used as paths (Spline mode)"
+        button     btnAddP "+ Add"  width:66 across:2 \
+            tooltip:"Click splines to add as paths; right-click to finish"
         button     btnDelP "Remove" width:66
 
         label      lbl3 "Include splines" align:#left offset:[0,8]
         listbox    lbI     "" items:#() height:3
-        pickbutton pbAddI  "+ Add"  width:66 across:2 filter:MaxScatter_filterShape \
-            tooltip:"Closed splines: scatter only inside them"
+        button     btnAddI "+ Add"  width:66 across:2 \
+            tooltip:"Click closed splines: scatter only inside them; right-click to finish"
         button     btnDelI "Remove" width:66
 
         label      lbl4 "Exclude splines" align:#left offset:[0,8]
         listbox    lbE     "" items:#() height:3
-        pickbutton pbAddE  "+ Add"  width:66 across:2 filter:MaxScatter_filterShape \
-            tooltip:"Closed splines: never scatter inside them"
+        button     btnAddE "+ Add"  width:66 across:2 \
+            tooltip:"Click closed splines: never scatter inside them; right-click to finish"
         button     btnDelE "Remove" width:66
 
+        /* Selection-preserving refresh: repopulating a listbox resets its
+           selection, which made the panel look like it lost its setup. */
         fn refresh =
         (
+            local keepS = lbS.selection, keepT = lbT.selection, keepP = lbP.selection
+            local keepI = lbI.selection, keepE = lbE.selection
             lbS.items = for i = 1 to srcNodes.count collect
             (
                 local nm = if isValidNode srcNodes[i] then srcNodes[i].name else "<deleted>"
@@ -178,6 +184,11 @@ plugin helper MaxScatterObj
             lbP.items = for s in pathSplines collect (if isValidNode s then s.name else "<deleted>")
             lbI.items = for s in inclSplines collect (if isValidNode s then s.name else "<deleted>")
             lbE.items = for s in exclSplines collect (if isValidNode s then s.name else "<deleted>")
+            if keepS > 0 and keepS <= lbS.items.count do lbS.selection = keepS
+            if keepT > 0 and keepT <= lbT.items.count do lbT.selection = keepT
+            if keepP > 0 and keepP <= lbP.items.count do lbP.selection = keepP
+            if keepI > 0 and keepI <= lbI.items.count do lbI.selection = keepI
+            if keepE > 0 and keepE <= lbE.items.count do lbE.selection = keepE
             local sel = lbS.selection
             spnProb.enabled = (sel > 0 and sel <= srcWeights.count)
             if spnProb.enabled do spnProb.value = srcWeights[sel]
@@ -191,18 +202,24 @@ plugin helper MaxScatterObj
             lbP.enabled = not surf; pbAddP.enabled = not surf; btnDelP.enabled = not surf
         )
 
-        on pbAddS picked o do
+        on btnAddS pressed do
         (
-            if o != undefined do
+            -- continuous pick: keep clicking, right-click ends; ONE regen after
+            local go = true
+            while go do
             (
-                srcNodes.count += 1;   srcNodes[srcNodes.count] = o
-                srcWeights.count += 1; srcWeights[srcWeights.count] = 1.0
-                srcXforms.count += 1;  srcXforms[srcXforms.count] = MaxScatter.pipeline.defXform
-                lbS.selection = srcNodes.count
-                refresh()
-                MaxScatterObj_regen this
+                local o = pickObject filter:MaxScatter_filterSrc
+                if o == undefined then go = false
+                else
+                (
+                    srcNodes.count += 1;   srcNodes[srcNodes.count] = o
+                    srcWeights.count += 1; srcWeights[srcWeights.count] = 1.0
+                    srcXforms.count += 1;  srcXforms[srcXforms.count] = MaxScatter.pipeline.defXform
+                    lbS.selection = srcNodes.count
+                    refresh()
+                )
             )
-            pbAddS.text = "+ Add"
+            MaxScatterObj_regen this
         )
         on btnDelS pressed do
         (
@@ -232,10 +249,16 @@ plugin helper MaxScatterObj
             )
         )
 
-        on pbAddT picked o do
+        on btnAddT pressed do
         (
-            if o != undefined do ( surfNodes.count += 1; surfNodes[surfNodes.count] = o; refresh(); MaxScatterObj_regen this )
-            pbAddT.text = "+ Add"
+            local go = true
+            while go do
+            (
+                local o = pickObject filter:MaxScatter_filterGeo
+                if o == undefined then go = false
+                else ( surfNodes.count += 1; surfNodes[surfNodes.count] = o; refresh() )
+            )
+            MaxScatterObj_regen this
         )
         on btnDelT pressed do
         (
@@ -248,10 +271,16 @@ plugin helper MaxScatterObj
             )
         )
 
-        on pbAddP picked o do
+        on btnAddP pressed do
         (
-            if o != undefined do ( pathSplines.count += 1; pathSplines[pathSplines.count] = o; refresh(); MaxScatterObj_regen this )
-            pbAddP.text = "+ Add"
+            local go = true
+            while go do
+            (
+                local o = pickObject filter:MaxScatter_filterShape
+                if o == undefined then go = false
+                else ( pathSplines.count += 1; pathSplines[pathSplines.count] = o; refresh() )
+            )
+            MaxScatterObj_regen this
         )
         on btnDelP pressed do
         (
@@ -264,10 +293,16 @@ plugin helper MaxScatterObj
             )
         )
 
-        on pbAddI picked o do
+        on btnAddI pressed do
         (
-            if o != undefined do ( inclSplines.count += 1; inclSplines[inclSplines.count] = o; refresh(); MaxScatterObj_regen this )
-            pbAddI.text = "+ Add"
+            local go = true
+            while go do
+            (
+                local o = pickObject filter:MaxScatter_filterShape
+                if o == undefined then go = false
+                else ( inclSplines.count += 1; inclSplines[inclSplines.count] = o; refresh() )
+            )
+            MaxScatterObj_regen this
         )
         on btnDelI pressed do
         (
@@ -280,10 +315,16 @@ plugin helper MaxScatterObj
             )
         )
 
-        on pbAddE picked o do
+        on btnAddE pressed do
         (
-            if o != undefined do ( exclSplines.count += 1; exclSplines[exclSplines.count] = o; refresh(); MaxScatterObj_regen this )
-            pbAddE.text = "+ Add"
+            local go = true
+            while go do
+            (
+                local o = pickObject filter:MaxScatter_filterShape
+                if o == undefined then go = false
+                else ( exclSplines.count += 1; exclSplines[exclSplines.count] = o; refresh() )
+            )
+            MaxScatterObj_regen this
         )
         on btnDelE pressed do
         (
@@ -511,6 +552,8 @@ plugin helper MaxScatterObj
             tooltip:"Thins the proxy display only; the render is always complete"
         spinner spnPts "Points/item " type:#integer range:[1, 2000, 20] fieldwidth:44 \
             tooltip:"Point cloud density per item, like Corona's previz"
+        spinner spnIcon "Icon size   " type:#worldunits range:[1, 1e9, 100] fieldwidth:56 \
+            tooltip:"Size of the MaxScatter sign in the viewport; drag while creating also sets it"
         button btnBake "Bake" width:100 offset:[0,8] \
             tooltip:"Detach all instances from the scatter (Instances emitter)"
         hyperLink lnkRepo "MaxScatter on GitHub" \
@@ -547,8 +590,12 @@ plugin helper MaxScatterObj
         )
     )
 
-    /*  The world presence: "MaxScatter" text in a white rectangle. Cached
-        meshes only -- building happens in regen / creation, never here.  */
+    /*  The world presence: "MaxScatter" text in a white rectangle, scaled to
+        iconSize per instance (cached; rebuilt only when the size changes).
+        Cached meshes only -- building happens in regen / creation, never here.  */
+    local gzCache
+    local gzKey = -1.0
+
     on getDisplayMesh do
     (
         local msh = undefined
@@ -557,7 +604,19 @@ plugin helper MaxScatterObj
             local deps = refs.dependentNodes this
             if deps.count > 0 do msh = MaxScatter.emitDisplay.meshFor deps[1].inode.handle
         )
-        if msh == undefined or msh.numVerts == 0 do msh = MaxScatter.emitDisplay.gizmo()
+        if msh == undefined or msh.numVerts == 0 do
+        (
+            local base = MaxScatter.emitDisplay.gizmo()
+            local key = iconSize + base.numVerts   -- also refresh when text replaces fallback
+            if gzCache == undefined or gzKey != key do
+            (
+                local f = iconSize / (amax 1.0 MaxScatter.emitDisplay.gizmoW)
+                gzCache = copy base
+                for v = 1 to gzCache.numVerts do setVert gzCache v ((getVert base v) * f)
+                gzKey = key
+            )
+            msh = gzCache
+        )
         msh
     )
     on useWireColor do true
@@ -570,8 +629,15 @@ plugin helper MaxScatterObj
     /*  Container cleanup on delete lives in pipeline.ms (#nodePreDelete):
         the plugin's own `on deleted` fires after the paramblock detaches.  */
 
-    tool create
+    /* Click places; drag before releasing sizes the sign (min 1 m). */
+    tool create numPoints:2
     (
-        on mousePoint click do ( nodeTM.translation = gridPoint; #stop )
+        on mousePoint click do case click of
+        (
+            1: nodeTM.translation = gridPoint
+            2: #stop
+        )
+        on mouseMove click do if click == 2 do
+            iconSize = amax (try (units.decodeValue "1m") catch 100.0) (length gridDist)
     )
 )

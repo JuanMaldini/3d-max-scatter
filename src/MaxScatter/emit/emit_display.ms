@@ -21,6 +21,7 @@ struct MaxScatter_EmitDisplay
     entries = #(),      -- per owner: #(nodeHandle, srcs, places, mesh, renderedRoots)
     gizmoM  = undefined,
     fallbackM = undefined,
+    gizmoW  = 100.0,    -- built width of the gizmo/fallback, for icon-size scaling
 
     -- ---------------------------------------------------------------- entries
 
@@ -111,6 +112,7 @@ struct MaxScatter_EmitDisplay
             local msh = TriMesh()
             setMesh msh verts:verts faces:faces
             gizmoM = msh
+            gizmoW = rw * 2.0
         )
         catch ( if MaxScatter != undefined do MaxScatter.logErr "buildGizmo" (getCurrentException()) )
         gizmoM
@@ -129,6 +131,7 @@ struct MaxScatter_EmitDisplay
                 this.addBox verts faces [-w*0.5, -w*0.15, 0] [w*0.5, w*0.15, w*0.01]
                 fallbackM = TriMesh()
                 setMesh fallbackM verts:verts faces:faces
+                if gizmoM == undefined do gizmoW = w
             )
             fallbackM
         )
