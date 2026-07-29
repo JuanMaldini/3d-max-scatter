@@ -6,9 +6,9 @@ app.png
 icon.ico
 
 # Artefactos de build
-dist/
+
 build/tmp/
-*.mzp
+
 
 # 3ds Max
 *.bak
