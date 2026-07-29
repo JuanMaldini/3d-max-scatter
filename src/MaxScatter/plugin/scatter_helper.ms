@@ -193,6 +193,18 @@ plugin helper MaxScatterObj
         on exclScale set v do if not loading do MaxScatterObj_regen this
     )
 
+    /*  The density map's scale knob, completing the thin/shrink pair every
+        other mask already has (inclThin/inclScale, exclThin/exclScale). Its
+        own block, appended, so pbDist keeps its slots; a parameters block may
+        bind to a rollout an earlier block already uses, so the spinner still
+        lives in Distribution.  */
+    parameters pbMap rollout:rolDist
+    (
+        mapScale type:#float default:0.0 ui:spnMapScl
+
+        on mapScale set v do if not loading do MaxScatterObj_regen this
+    )
+
     rollout rolSrc "Sources"
     (
         radiobuttons rdoMode "Scatter on" labels:#("Surface", "Spline") columns:2 \
@@ -365,6 +377,8 @@ plugin helper MaxScatterObj
         checkbox chkMapInv  "Invert"
         spinner  spnMapGam  "Gamma " type:#float range:[0.1, 10, 1] scale:0.05 fieldwidth:48 across:2
         spinner  spnMapTile "Tile  " type:#float range:[0.01, 1000, 1] fieldwidth:48
+        spinner  spnMapScl  "Scale " type:#float range:[0, 1, 0] scale:0.01 fieldwidth:48 \
+            tooltip:"How much the dark areas of the map shrink items; 0 leaves size untouched. Independent of Amount, so Amount 0 + Scale 1 varies size without changing the count"
 
         fn syncEnable =
         (
@@ -376,6 +390,7 @@ plugin helper MaxScatterObj
             local hasMap = surf and densityMap != undefined
             spnMapAmt.enabled = hasMap; chkMapInv.enabled = hasMap
             spnMapGam.enabled = hasMap; spnMapTile.enabled = hasMap
+            spnMapScl.enabled = hasMap
             try
             (
                 rolLim.chkSlope.enabled = surf
@@ -651,7 +666,8 @@ plugin helper MaxScatterObj
 
     /*  The world presence: "MaxScatter" text in a white rectangle, scaled to
         iconSize per instance (cached; rebuilt only when the size changes).
-        Cached meshes only -- building happens in regen / creation, never here.  */
+        The base mesh is baked data, so asking for it here is safe -- no scene
+        node gets created and the sign is correct from the first redraw.  */
     local gzCache
     local gzKey = -1.0
 
@@ -666,13 +682,12 @@ plugin helper MaxScatterObj
         if msh == undefined or msh.numVerts == 0 do
         (
             local base = MaxScatter.emitDisplay.gizmo()
-            local key = iconSize + base.numVerts   -- also refresh when text replaces fallback
-            if gzCache == undefined or gzKey != key do
+            if gzCache == undefined or gzKey != iconSize do
             (
-                local f = iconSize / (amax 1.0 MaxScatter.emitDisplay.gizmoW)
+                local f = iconSize / (amax 0.001 MaxScatter.emitDisplay.gizmoW)
                 gzCache = copy base
                 for v = 1 to gzCache.numVerts do setVert gzCache v ((getVert base v) * f)
-                gzKey = key
+                gzKey = iconSize
             )
             msh = gzCache
         )
@@ -680,9 +695,6 @@ plugin helper MaxScatterObj
     )
     on useWireColor do true
 
-    /*  NB: don't build the gizmo here -- creating helper nodes inside the
-        plugin's own creation context yields an empty snapshot. The pipeline
-        builds it on the first regen instead.  */
     on attachedToNode n do if not loading do
     (
         n.wirecolor = white

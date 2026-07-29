@@ -2,12 +2,15 @@
 
 Open source scattering tool for Autodesk 3ds Max.
 
-> **Status: early development (v0.1.0).** The core pipeline and UI work; the
-> feature set is still small. See [the roadmap](#roadmap).
+> **Status: v1.0.0.** The core pipeline, UI and packaging are in place. See
+> [the roadmap](#roadmap) for what is still open.
 
 ## Requirements
 
-3ds Max 2024–2027.
+3ds Max 2024–2027. MaxScatter is pure MAXScript with no SDK or Qt binding, so
+one copy serves every release; the only version-dependent code is the main-menu
+entry, which uses `menuMan` on 2024 and the `#cuiRegisterMenus` callback system
+that replaced it on 2025+ (see `src/MaxScatter/ui/menu.ms`).
 
 ## Install
 
@@ -23,7 +26,9 @@ cd 3d-max-scatter
 powershell -ExecutionPolicy Bypass -File build\dev_link.ps1
 ```
 
-Pass `-MaxVersion 2025` for another release, or `-Remove` to uninstall.
+By default this links into **every** 3ds Max profile it finds on the machine.
+Pass `-MaxVersion 2027` (or `-MaxVersion 2024,2027`) to narrow it, or `-Remove`
+to uninstall.
 
 ## Usage
 
@@ -44,8 +49,10 @@ automatically on every change; there is no Update button by design.
   ranges, uniform or per-axis scale, Z offset.
 - **Limits**: slope (degrees) and altitude (world Z).
 - **Include / Exclude splines**: closed splines define areas (XY projection).
-- **Density map**: any texture; luminance drives density, with Amount /
-  Invert / Gamma / Tile. The surface needs UVs.
+- **Density map**: any texture; luminance drives density *and* item size, with
+  Amount / Invert / Gamma / Tile / Scale. Amount and Scale are independent, so
+  Amount 0 + Scale 1 varies size without changing the count — a soft gradient
+  reads far better as size falloff than as thinning. The surface needs UVs.
 - **Camera**: frustum culling with FOV padding, behind-camera margin and an
   optional far limit. Re-culls automatically when the camera moves.
 - **Display / emitters**:

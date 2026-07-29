@@ -19,9 +19,11 @@ global MaxScatter
         "core\\filters.ms",
         "core\\transform.ms",
         "emit\\emit_nodes.ms",
+        "emit\\gizmo_data.ms",
         "emit\\emit_display.ms",
         "core\\pipeline.ms",
         "ui\\theme.ms",
+        "ui\\menu.ms",
         "plugin\\scatter_helper.ms"
     )
 
@@ -53,21 +55,17 @@ global MaxScatter
     else
         format "[MaxScatter] load finished with % problem(s)\n" failed
 
-    -- main menu entry (idempotent): MaxScatter > Create MaxScatter
-    try
-    (
-        if (menuMan.findMenu "MaxScatter") == undefined do
+    /*  Main menu entry. On 2024 this builds it through menuMan; on 2025+ the
+        package's Contents/cui/MaxScatter.mnx owns the menu and this only reports
+        whether it is there yet, so a "not on the bar" result at load time is not
+        an error -- the host may not have built its menu configuration yet. See
+        ui/menu.ms.  */
+    if failed == 0 do
+        try
         (
-            local m = menuMan.createMenu "MaxScatter"
-            local ai = menuMan.createActionItem "MaxScatter_Create" "MaxScatter"
-            if ai != undefined do
-            (
-                m.addItem ai -1
-                local smi = menuMan.createSubMenuItem "MaxScatter" m
-                (menuMan.getMainMenuBar()).addItem smi -1
-                menuMan.updateMenuBar()
-            )
+            local legacy = (MaxScatter.menu.cuiMgr()) == undefined
+            if not (MaxScatter.menu.install()) and legacy do
+                format "[MaxScatter] menu not added -- use the toolbar button (Customize UI > Toolbars > MaxScatter)\n"
         )
-    )
-    catch ( format "[MaxScatter] menu install skipped: %\n" (getCurrentException()) )
+        catch ( format "[MaxScatter] menu install skipped: %\n" (getCurrentException()) )
 )

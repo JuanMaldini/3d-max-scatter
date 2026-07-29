@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    MaxScatter: main menu entry for 3ds Max 2025 and later.
+
+    NOTE for editors: a double hyphen is illegal inside an XML comment, so this
+    prose cannot use the dash separator the MAXScript sources do.
+
+    2025 replaced menuMan with a menu system the host assembles from menu
+    configurations, and a .mnx registered as a package component is the
+    supported way for a plugin to add itself to one. The host applies these
+    transformations every time it builds a configuration, so the entry survives
+    workspace switches and CUI resets with no script running at all.
+
+    Schema: UI_ln/CUI/XSD/MenuTransformationsSchema.xsd in the Max install.
+    Reference: MAXtoA.mnx, which adds its own top-level menu the same way.
+
+    The two foreign GUIDs are fixed parts of the stock menu bar:
+      b4779ebb ... the main menu bar itself
+      cee8f758 ... the Help menu, so MaxScatter lands just before it instead of
+                   after Help, where an appended menu ends up.
+
+    ActionId is "<action table>-<macroScript name>`<category>"; 647394 is the
+    macroScript action table.
+-->
+<MaxMenuTransformations>
+    <CreateMenu ParentId="b4779ebb-a6f0-4815-9777-57c01c0b584c"
+                MenuId="7bfc7fee-410e-447b-9179-65eb0c6f38b3"
+                Title="MaxScatter"
+                BeforeId="cee8f758-2199-411b-81e7-d3ff4a80d143"/>
+
+    <CreateMenuAction MenuId="7bfc7fee-410e-447b-9179-65eb0c6f38b3"
+                      Id="0b32d450-dac0-4aa4-ab71-89c464219841"
+                      ActionId="647394-MaxScatter_Create`MaxScatter"/>
+</MaxMenuTransformations>

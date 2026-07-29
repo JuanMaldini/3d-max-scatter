@@ -7,8 +7,12 @@
     interactive rendering (IPR won't re-fire callbacks).
 
     Gizmo: the scatter object itself displays as the text "MaxScatter" inside
-    a containing rectangle (min 1 m wide), white. Built once from a temporary
-    Text+Extrude node, then cached; getDisplayMesh only ever reads caches.
+    a containing rectangle, white. The geometry is BAKED (emit/gizmo_data.ms,
+    regenerate with build/bake_gizmo.ms), so building it touches no scene node
+    and getDisplayMesh can ask for it directly, at any point in the object's
+    life. It used to be built from a temporary Text node on the first regen,
+    which is why a freshly created helper drew a placeholder bar until some
+    parameter changed.
 
     Session cache only: placements are rebuilt on file open (#filePostOpen in
     pipeline.ms) from the persistent paramblocks.
@@ -20,8 +24,7 @@ struct MaxScatter_EmitDisplay
 (
     entries = #(),      -- per owner: #(nodeHandle, srcs, places, mesh, renderedRoots)
     gizmoM  = undefined,
-    fallbackM = undefined,
-    gizmoW  = 100.0,    -- built width of the gizmo/fallback, for icon-size scaling
+    gizmoW  = 1.0,      -- width of the cached gizmo, for icon-size scaling
 
     -- ---------------------------------------------------------------- entries
 
@@ -69,72 +72,30 @@ struct MaxScatter_EmitDisplay
         ok
     ),
 
-    /*  SCENE-MUTATING (temp Text node): never call from getDisplayMesh.
-        Called from regen and from object creation, where mutation is fine.  */
-    fn buildGizmo =
-    (
-        -- also retry if a previous attempt cached an empty mesh (e.g. built
-        -- from inside the plugin's own creation context)
-        if gizmoM == undefined or gizmoM.numVerts == 0 do try
-        (
-            local w1m = try (units.decodeValue "1m") catch 100.0
+    /*  The world sign, normalized to 1.0 wide. Pure -- no scene node, no font
+        lookup -- so getDisplayMesh may call it, which is what makes the sign
+        appear the instant a helper is created.
 
-            local tn = text text:"MaxScatter" size:(w1m * 0.18)
-            addModifier tn (Extrude amount:(w1m * 0.002))
-            local tm = snapshotAsMesh tn
-            delete tn
-
-            local verts = #(), faces = #()
-
-            -- text verts, centered at the origin
-            local mn = [1e9,1e9,1e9], mx = [-1e9,-1e9,-1e9]
-            for v = 1 to tm.numVerts do
-            (
-                local p = getVert tm v
-                mn.x = amin mn.x p.x; mn.y = amin mn.y p.y; mn.z = amin mn.z p.z
-                mx.x = amax mx.x p.x; mx.y = amax mx.y p.y; mx.z = amax mx.z p.z
-            )
-            local ctr = (mn + mx) * 0.5
-            for v = 1 to tm.numVerts do append verts ((getVert tm v) - ctr)
-            for f = 1 to tm.numFaces do append faces (getFace tm f)
-            free tm
-
-            -- containing rectangle: min 1 m wide, padded around the text
-            local tw = mx.x - mn.x, th = mx.y - mn.y
-            local rw = 0.5 * (amax w1m (tw * 1.25))
-            local rh = 0.5 * (amax (w1m * 0.3) (th * 2.2))
-            local bar = w1m * 0.02, hz = w1m * 0.002
-            this.addBox verts faces [-rw, rh - bar, -hz] [ rw,  rh,       hz]   -- top
-            this.addBox verts faces [-rw, -rh,      -hz] [ rw, -rh + bar, hz]   -- bottom
-            this.addBox verts faces [-rw, -rh,      -hz] [-rw + bar, rh,  hz]   -- left
-            this.addBox verts faces [ rw - bar, -rh,-hz] [ rw,  rh,       hz]   -- right
-
-            local msh = TriMesh()
-            setMesh msh verts:verts faces:faces
-            gizmoM = msh
-            gizmoW = rw * 2.0
-        )
-        catch ( if MaxScatter != undefined do MaxScatter.logErr "buildGizmo" (getCurrentException()) )
-        gizmoM
-    ),
-
-    /* Read-only fallback for getDisplayMesh before the gizmo exists. */
+        The bare-rectangle branch only runs if gizmo_data.ms failed to load:
+        getDisplayMesh must never return undefined, and an unreadable icon is
+        a better failure than an object with no visible presence at all.  */
     fn gizmo =
     (
-        if gizmoM != undefined and gizmoM.numVerts > 0 then gizmoM
-        else
+        if gizmoM == undefined or gizmoM.numVerts == 0 do
         (
-            if fallbackM == undefined do
+            local verts = #(), faces = #()
+            local d = try (MaxScatter.gizmoData) catch undefined
+            if d != undefined then ( verts = d.verts; faces = d.faces; gizmoW = d.width )
+            else
             (
-                local w = try (units.decodeValue "1m") catch 100.0
-                local verts = #(), faces = #()
-                this.addBox verts faces [-w*0.5, -w*0.15, 0] [w*0.5, w*0.15, w*0.01]
-                fallbackM = TriMesh()
-                setMesh fallbackM verts:verts faces:faces
-                if gizmoM == undefined do gizmoW = w
+                this.addBox verts faces [-0.5, -0.15, 0.0] [0.5, 0.15, 0.01]
+                gizmoW = 1.0
+                MaxScatter.log "gizmo_data.ms not loaded -- drawing a plain rectangle"
             )
-            fallbackM
+            gizmoM = TriMesh()
+            setMesh gizmoM verts:verts faces:faces
         )
+        gizmoM
     ),
 
     -- ----------------------------------------------------------- proxy meshes

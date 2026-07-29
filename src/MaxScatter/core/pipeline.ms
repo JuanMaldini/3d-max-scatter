@@ -78,7 +78,6 @@ struct MaxScatter_Pipeline
             local owner = if deps.count > 0 then deps[1] else undefined
             if isValidNode owner do
             (
-                MaxScatter.emitDisplay.buildGizmo()   -- no-op once cached
                 local srcs = #(), wts = #(), pps = #()
                 for i = 1 to p.srcNodes.count do
                     if isValidNode p.srcNodes[i] do
@@ -198,6 +197,27 @@ struct MaxScatter_Pipeline
                                         keep = (abs pl.x) <= d * tHalf and (abs pl.y) <= d * tVert
                                 )
 
+                                /*  Density map. One luminance sample per point
+                                    feeds BOTH the thinning (mapAmount) and the
+                                    shrinking (mapScale), so the map behaves
+                                    like the spline masks below. Runs before
+                                    them because the scale product needs lum.
+                                    No map, or spline mode (dmap is never built
+                                    there -- it needs UVs), leaves lum at 1.0,
+                                    which makes every factor below a no-op.  */
+                                local lum = 1.0
+                                if keep and dmap != undefined and samples[i][3] != undefined do
+                                (
+                                    local uv = samples[i][3] * p.mapTile
+                                    local u = mod uv.x 1.0; if u < 0.0 do u += 1.0
+                                    local vv = mod uv.y 1.0; if vv < 0.0 do vv += 1.0
+                                    local px = getPixels dmap [int (u * 255), int ((1.0 - vv) * 255)] 1
+                                    lum = (px[1].r + px[1].g + px[1].b) / 765.0
+                                    if p.mapGamma != 1.0 do lum = lum ^ p.mapGamma
+                                    if p.mapInvert do lum = 1.0 - lum
+                                    keep = rMap <= (1.0 - p.mapAmount + lum * p.mapAmount)
+                                )
+
                                 /*  Spline masks. 0 culls outright; inside the
                                     falloff band the value drives how much the
                                     item thins out and shrinks, so a stroke can
@@ -219,22 +239,11 @@ struct MaxScatter_Pipeline
                                                (1.0 - p.exclThin * (1.0 - me))
                                     if kp < 1.0 do keep = rMask <= kp
                                     scaleMul *= (1.0 - p.inclScale * (1.0 - mi)) * \
-                                                (1.0 - p.exclScale * (1.0 - me))
+                                                (1.0 - p.exclScale * (1.0 - me)) * \
+                                                (1.0 - p.mapScale  * (1.0 - lum))
                                     -- a zero-scale matrix is degenerate: instances
                                     -- with one collapse normals and hit renderers
                                     if scaleMul < 0.001 do scaleMul = 0.001
-                                )
-
-                                if keep and dmap != undefined and samples[i][3] != undefined do
-                                (
-                                    local uv = samples[i][3] * p.mapTile
-                                    local u = mod uv.x 1.0; if u < 0.0 do u += 1.0
-                                    local vv = mod uv.y 1.0; if vv < 0.0 do vv += 1.0
-                                    local px = getPixels dmap [int (u * 255), int ((1.0 - vv) * 255)] 1
-                                    local lum = (px[1].r + px[1].g + px[1].b) / 765.0
-                                    if p.mapGamma != 1.0 do lum = lum ^ p.mapGamma
-                                    if p.mapInvert do lum = 1.0 - lum
-                                    keep = rMap <= (1.0 - p.mapAmount + lum * p.mapAmount)
                                 )
 
                                 if keep do

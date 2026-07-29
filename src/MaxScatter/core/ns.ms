@@ -11,7 +11,7 @@ global MaxScatter
 
 struct MaxScatterNS
 (
-    version   = "0.1.0",
+    version   = "1.0.0",
     repoUrl   = "https://github.com/JuanMaldini/3d-max-scatter",
     rootDir   = "",
 
@@ -21,9 +21,11 @@ struct MaxScatterNS
     filters     = undefined,
     transform   = undefined,
     emitNodes   = undefined,
+    gizmoData   = undefined,
     emitDisplay = undefined,
     pipeline    = undefined,
     theme       = undefined,
+    menu        = undefined,
     state       = undefined,
     pendingRegen = #(),    -- plugin instances queued by the regen debounce
     pendingCleanup = #(),  -- item containers whose scatter object was deleted
