@@ -137,6 +137,9 @@ plugin helper MaxScatterObj
         on prxMode  set v do if not loading and emitMode == 2 do MaxScatter_rtRestyle this
         on dispPct  set v do if not loading and emitMode == 2 do MaxScatter_rtRestyle this
         on pcPoints set v do if not loading and emitMode == 2 do MaxScatter_rtRestyle this
+        -- the sign is baked into the proxy mesh, so resizing it rebuilds that
+        -- mesh; in Instances mode getDisplayMesh rescales its own cache instead
+        on iconSize set v do if not loading and emitMode == 2 do MaxScatter_rtRestyle this
     )
 
     /*  Appended blocks -- new params go at the END so existing slots keep
@@ -630,7 +633,7 @@ plugin helper MaxScatterObj
             tooltip:"Size of the MaxScatter sign in the viewport; drag while creating also sets it"
         button btnBake "Bake" width:100 offset:[0,8] \
             tooltip:"Detach all instances from the scatter (Instances emitter)"
-        hyperLink lnkRepo "MaxScatter on GitHub" \
+        hyperLink lnkRepo "GitHub" \
             address:"https://github.com/JuanMaldini/3d-max-scatter" \
             color:(color 60 190 210) hovercolor:(color 130 225 245) offset:[0,8]
 
@@ -716,3 +719,15 @@ plugin helper MaxScatterObj
             iconSize = amax (try (units.decodeValue "1m") catch 100.0) (length gridDist)
     )
 )
+
+/*  Prime the surface/spline watchers HERE, not in pipeline.ms.
+
+    pipeline.ms defines MaxScatter_depWatch but loads before this file, and
+    depWatch walks getClassInstances MaxScatterObj -- which is empty until the
+    plugin clause above has been compiled. Priming it there registered nothing
+    at all, so a hot-reload left every existing scatter unwatched until a list
+    was edited. From here the class exists, so the scatters already in the
+    scene are picked up immediately.
+
+    The other entry points (list edits, file open) stay where they are.  */
+try (MaxScatter_depWatch()) catch()

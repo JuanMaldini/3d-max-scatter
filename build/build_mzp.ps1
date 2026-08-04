@@ -90,7 +90,21 @@ if (Test-Path $mzp) { Remove-Item $mzp -Force }
 Add-Type -AssemblyName System.IO.Compression | Out-Null
 Add-Type -AssemblyName System.IO.Compression.FileSystem | Out-Null
 
-$stageFull = (Resolve-Path $stage).Path.TrimEnd('\')
+<#
+    .ProviderPath, not .Path.
+
+    On a UNC repo (\\server\share\...) Resolve-Path's .Path comes back
+    provider-qualified -- "Microsoft.PowerShell.Core\FileSystem::\\server\..."
+    -- which is longer than the plain FullName of every staged file. The
+    Substring below then threw "startIndex cannot be larger than length of
+    string" AFTER the zip file had already been created, leaving a valid but
+    EMPTY 22-byte .mzp in dist\. Dragging that into Max does nothing at all,
+    with no error: the package has no install.ms to run.
+
+    .ProviderPath is always the bare filesystem path, on UNC and on a local
+    drive alike.
+#>
+$stageFull = (Resolve-Path $stage).ProviderPath.TrimEnd('\')
 $fs = [System.IO.File]::Open($mzp, [System.IO.FileMode]::Create)
 try {
     $zipArchive = New-Object System.IO.Compression.ZipArchive($fs, [System.IO.Compression.ZipArchiveMode]::Create)
@@ -107,12 +121,23 @@ try {
 }
 finally { $fs.Dispose() }
 
-# A backslash here is the whole bug above, so never ship one.
+# A backslash here is the whole bug above, so never ship one. An EMPTY archive
+# is the other way this has shipped broken, so both are checked by reading the
+# finished file back rather than trusting the loop that wrote it.
 $bad = @()
+$names = @()
 $zr = [System.IO.Compression.ZipFile]::OpenRead($mzp)
-try { $bad = @($zr.Entries | Where-Object { $_.FullName -like '*\*' } | ForEach-Object { $_.FullName }) }
+try {
+    $names = @($zr.Entries | ForEach-Object { $_.FullName })
+    $bad   = @($names | Where-Object { $_ -like '*\*' })
+}
 finally { $zr.Dispose() }
 if ($bad) { throw "zip entries use backslash separators (Max cannot extract these): $($bad -join ', ')" }
+
+foreach ($need in @("install.ms", "mzp.run", "PackageContents.xml",
+                    "Contents/scripts/MaxScatter/init.ms")) {
+    if ($names -notcontains $need) { throw "the built .mzp does not contain $need (entries: $($names.Count))" }
+}
 
 $size = [math]::Round((Get-Item $mzp).Length / 1KB, 1)
 "built: $mzp ($size KB)  version $ver"

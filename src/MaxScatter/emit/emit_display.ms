@@ -19,6 +19,7 @@
 */
 
 global MaxScatter
+global MaxScatter_emitPoolDrainAll   -- emit/emit_nodes.ms
 
 struct MaxScatter_EmitDisplay
 (
@@ -114,7 +115,7 @@ struct MaxScatter_EmitDisplay
         item, like Corona's previz density). pct thins the DISPLAY only; the
         render always materialises the full list. ownerInv converts world
         placements into the helper's local space, so the icon stays movable.  */
-    fn buildMesh srcs places prxMode pct pcPoints ownerInv:(matrix3 1) =
+    fn buildMesh srcs places prxMode pct pcPoints ownerInv:(matrix3 1) iconSize:0.0 =
     (
         local bbs = for s in srcs collect (MaxScatter.emitNodes.unitLocalBBox s)
         local pcl = if prxMode == 3 then
@@ -173,6 +174,23 @@ struct MaxScatter_EmitDisplay
             i += step
         )
 
+        /*  The sign travels WITH the proxy mesh.
+
+            getDisplayMesh returns this mesh INSTEAD of the sign and only falls
+            back to the sign when the mesh is empty, so a proxy scatter used to
+            disappear into its own cloud of boxes: no label, nothing to click
+            that reads as a MaxScatter. Baking the sign in here keeps one cached
+            mesh and costs nothing per redraw. iconSize 0 leaves it out, which
+            is what a caller that only wants the proxy asks for.  */
+        if iconSize > 0.0 do
+        (
+            local g = this.gizmo()
+            local f = iconSize / (amax 0.001 gizmoW)
+            local base = verts.count
+            for v = 1 to g.numVerts do append verts ((getVert g v) * f)
+            for k = 1 to g.numFaces do append faces ((getFace g k) + [base,base,base])
+        )
+
         local msh = TriMesh()
         if verts.count > 0 do setMesh msh verts:verts faces:faces
         msh
@@ -183,6 +201,9 @@ struct MaxScatter_EmitDisplay
     /* Materialise real units for the frame, then remove them afterwards. */
     fn renderStart =
     (
+        -- parked units are hidden, so they would not render anyway; draining
+        -- keeps the frame's scene graph honest and costs nothing here
+        try (MaxScatter_emitPoolDrainAll()) catch()
         with undo off
             for e in entries do
             (

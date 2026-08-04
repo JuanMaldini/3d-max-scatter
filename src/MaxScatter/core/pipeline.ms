@@ -17,11 +17,19 @@ global MaxScatterObj_regen
 global MaxScatter_rtRestyle
 global MaxScatter_camWatch
 global MaxScatter_selfWatch
+global MaxScatter_depWatch
+global MaxScatter_depTouch   -- declared up here: depWatch's handlers call it
 global MaxScatter_queueCleanup
 global MaxScatter_rtPre
 global MaxScatter_rtPost
 global MaxScatter_postOpen
 global MaxScatter_preDel
+global MaxScatter_preSave
+global MaxScatter_emitBuckets   -- emit/emit_nodes.ms; pruned by the regen timer
+global MaxScatter_emitPool      -- emit/emit_nodes.ms; drained by the regen timer
+global MaxScatter_emitPoolDrain
+global MaxScatter_emitPoolDrainAll
+global MaxScatter_emitPoolIdleMs
 
 struct MaxScatter_Pipeline
 (
@@ -91,7 +99,20 @@ struct MaxScatter_Pipeline
                 local paths = for s in p.pathSplines  where isValidNode s collect s
                 local onSpline = p.distMode == 2
 
-                undo "MaxScatter" on
+                /*  Undo OFF, deliberately.
+
+                    A regen is derived data: it is fully reproducible from the
+                    paramblock, and the paramblock records its own undo. With
+                    undo ON, every one of the N `n.transform =` writes below was
+                    pushed onto the undo stack -- on a spinner drag that is N
+                    writes recorded every 150 ms tick, which dominated the cost
+                    of a regen and grew the undo buffer without bound.
+
+                    Ctrl+Z still works, and works better: it undoes the PARAMETER
+                    change, whose set handler queues a regen that rebuilds the
+                    scene from the restored value. One cheap step instead of N
+                    recorded transforms.  */
+                undo off
                 (
                     local holder = this.ensureHolder p owner
 
@@ -279,7 +300,8 @@ struct MaxScatter_Pipeline
                             -- the self-watcher rebuilds it after a move.
                             MaxScatter.emitNodes.clear holder
                             local msh = MaxScatter.emitDisplay.buildMesh srcs places \
-                                p.prxMode p.dispPct p.pcPoints ownerInv:(inverse owner.transform)
+                                p.prxMode p.dispPct p.pcPoints ownerInv:(inverse owner.transform) \
+                                iconSize:p.iconSize
                             MaxScatter.emitDisplay.setEntry owner.inode.handle srcs places msh
                             p.rtTick += 1   -- pb change -> display invalidate
                             made = places.count
@@ -338,6 +360,25 @@ fn MaxScatter_regenTick s e =
     for i = ent.count to 1 by -1 do
         if not (isValidNode (maxOps.getNodeByHandle ent[i][1])) do deleteItem ent i
 
+    -- same for the emitter-A bucket cache, keyed by the item holder
+    for i = MaxScatter_emitBuckets.count to 1 by -1 do
+        if not (isValidNode (maxOps.getNodeByHandle MaxScatter_emitBuckets[i][1])) do
+            deleteItem MaxScatter_emitBuckets i
+
+    /*  Parked units are real scene nodes, so they get a stay of execution, not
+        a pardon: once a scatter has been still for a while the spinner drag
+        they were kept for is clearly over, and holding thousands of hidden
+        nodes past that point buys nothing.  */
+    local now = timeStamp()
+    for i = MaxScatter_emitPool.count to 1 by -1 do
+    (
+        local e = MaxScatter_emitPool[i]
+        if not (isValidNode (maxOps.getNodeByHandle e[1])) then
+            try (MaxScatter_emitPoolDrain e[1]) catch (deleteItem MaxScatter_emitPool i)
+        else if (now - e[5]) > MaxScatter_emitPoolIdleMs do
+            try (MaxScatter_emitPoolDrain e[1]) catch()
+    )
+
     try (MaxScatter_selfWatch()) catch()   -- keep icon watchers in sync
     ok
 )
@@ -360,15 +401,27 @@ MaxScatter_regenTimer = dotNetObject "System.Windows.Forms.Timer"
 MaxScatter_regenTimer.interval = 150
 dotNet.addEventHandler MaxScatter_regenTimer "Tick" MaxScatter_regenTick
 
-/* Thin, stable entry point the plugin calls: queue + start the timer. The
-   timer is left running if already started, so drags update live (throttle,
-   not debounce). */
-fn MaxScatterObj_regen p =
+/*  Thin, stable entry point the plugin calls: queue + start the timer.
+
+    Two pacings, because two kinds of input need opposite behaviour:
+
+    throttle (default, `debounce:false`) -- the timer is left running if it is
+    already started, so a spinner drag regenerates every 150 ms and the viewport
+    tracks the drag live. This is what every parameter handler wants.
+
+    debounce (`debounce:true`) -- the timer is restarted, so the regen lands
+    once the events STOP. This is what editing a spline or a surface wants: a
+    regen on a path scatter measures 200-550 ms, far too slow to fire while
+    vertices are being dragged, and a half-finished spline is not worth
+    scattering onto anyway. The result updates as soon as the edit pauses,
+    without a manual refresh button.  */
+fn MaxScatterObj_regen p debounce:false =
 (
     if MaxScatter != undefined and MaxScatter.pipeline != undefined do
     (
         appendIfUnique MaxScatter.pendingRegen p
-        if not MaxScatter_regenTimer.Enabled do MaxScatter_regenTimer.start()
+        if debounce then ( MaxScatter_regenTimer.stop(); MaxScatter_regenTimer.start() )
+        else if not MaxScatter_regenTimer.Enabled do MaxScatter_regenTimer.start()
     )
     0
 )
@@ -430,6 +483,8 @@ fn MaxScatter_addTo p what o =
         #include: ( p.inclSplines = a )
         #exclude: ( p.exclSplines = a )
     )
+    -- the watched set just changed; this is the only place lists grow
+    try (MaxScatter_depWatch()) catch()
     ok
 )
 
@@ -456,6 +511,7 @@ fn MaxScatter_removeAt p what idx =
             #include:  ( p.inclSplines = a )
             #exclude:  ( p.exclSplines = a )
         )
+        try (MaxScatter_depWatch()) catch()   -- and the only place they shrink
         true
     )
     else false
@@ -523,7 +579,7 @@ fn MaxScatter_rtRestyle p =
             (
                 local e = MaxScatter.emitDisplay.entries[i]
                 e[4] = MaxScatter.emitDisplay.buildMesh e[2] e[3] p.prxMode p.dispPct p.pcPoints \
-                    ownerInv:(inverse deps[1].transform)
+                    ownerInv:(inverse deps[1].transform) iconSize:p.iconSize
                 p.rtTick += 1
             )
             else MaxScatterObj_regen p   -- no cache yet (fresh session)
@@ -547,6 +603,70 @@ fn MaxScatter_camWatch =
             for pb in (getClassInstances MaxScatterObj) where pb.camNode == c do
                 MaxScatterObj_regen pb
         )
+    ok
+)
+
+/*  Auto-update when a node the scatter DEPENDS ON changes.
+
+    Until this existed, only the camera and the scatter's own icon were watched:
+    moving a surface, or editing a path spline or a mask spline, changed nothing
+    until some parameter was touched by hand. Every input the pipeline reads is
+    watched here instead -- surfaces, paths, include/exclude masks, and the
+    scatter items themselves.
+
+    Both `transform` (the node was moved) and `geometry` (its shape was edited)
+    fire, and both queue a DEBOUNCED regen: `when geometry changes` fires
+    continuously through an Edit Spline / Edit Poly session, and a throttled
+    regen there would fight the user for the main thread. Debounced, the scatter
+    catches up the moment the edit pauses.
+
+    Watching srcNodes is redundant in Instances mode -- the items ARE instances
+    of the source, so Max updates them itself -- but it is not redundant in
+    Proxy mode, where the display mesh is built from the sources' bounding
+    boxes and would otherwise keep drawing the old shape.
+
+    One handler id for the whole set, cleared and rebuilt like the camera
+    watcher, so re-running this is always safe.  */
+fn MaxScatter_depWatch =
+(
+    deleteAllChangeHandlers id:#MaxScatterDepW
+    if (classOf MaxScatterObj) != undefined do
+        for pb in (getClassInstances MaxScatterObj) do
+        (
+            local watch = #()
+            for lst in #(pb.surfNodes, pb.pathSplines, pb.inclSplines,
+                         pb.exclSplines, pb.srcNodes) do
+                for n in lst where isValidNode n do appendIfUnique watch n
+            for n in watch do
+            (
+                when transform n changes id:#MaxScatterDepW handleAt:#redrawViews obj do
+                    MaxScatter_depTouch obj
+                when geometry  n changes id:#MaxScatterDepW handleAt:#redrawViews obj do
+                    MaxScatter_depTouch obj
+            )
+        )
+    ok
+)
+
+/*  A watched node changed: regen every scatter that reads it. The node is not
+    told which scatters those are, so they are looked up here -- there are only
+    ever a handful of scatters in a scene, and this runs once per settled edit,
+    not once per item.  */
+fn MaxScatter_depTouch n =
+(
+    try
+    (
+        if (classOf MaxScatterObj) != undefined and isValidNode n do
+            for pb in (getClassInstances MaxScatterObj) do
+            (
+                local hit = false
+                for lst in #(pb.surfNodes, pb.pathSplines, pb.inclSplines,
+                             pb.exclSplines, pb.srcNodes) while not hit do
+                    if (findItem lst n) > 0 do hit = true
+                if hit do MaxScatterObj_regen pb debounce:true
+            )
+    )
+    catch()
     ok
 )
 
@@ -579,8 +699,17 @@ fn MaxScatter_postOpen =
                 MaxScatterObj_regen pb
         MaxScatter_camWatch()
         MaxScatter_selfWatch()
+        MaxScatter_depWatch()
     )
     catch ( MaxScatter.logErr "postOpen" (getCurrentException()) )
+)
+
+/*  Parked units must never reach the .max file. They are an optimisation that
+    lives for a few seconds inside one session; saved, they would be invisible
+    junk in someone else's scene and would come back on every reopen.  */
+fn MaxScatter_preSave =
+(
+    try (MaxScatter_emitPoolDrainAll()) catch()
 )
 
 /*  Deleting a scatter must take its hidden container along. The plugin's own
@@ -606,3 +735,8 @@ callbacks.addScript #preRender     "MaxScatter_rtPre()"   id:#MaxScatterRT
 callbacks.addScript #postRender    "MaxScatter_rtPost()"  id:#MaxScatterRT
 callbacks.addScript #filePostOpen  "MaxScatter_postOpen()" id:#MaxScatterRT
 callbacks.addScript #nodePreDelete "MaxScatter_preDel()"  id:#MaxScatterRT
+callbacks.addScript #filePreSave   "MaxScatter_preSave()" id:#MaxScatterRT
+
+/*  NB: the dependency watchers are primed at the end of
+    plugin/scatter_helper.ms, not here -- MaxScatterObj has no instances to walk
+    until that file has compiled the plugin clause.  */
